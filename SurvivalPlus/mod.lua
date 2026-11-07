@@ -13,7 +13,7 @@ SP.MOD = "survivalplus"
 SP.CHANNEL = "survivalPlusProfiles"
 SP.PAGE = 6
 -- Le Lua du jeu refuse fn.champ. Les fonctions déjà enveloppées sont notées ici.
--- Le bac à sable retire setmetatable : une table ordinaire suffit.
+-- Le bac à sable retire setmetatable et rawset : une table ordinaire suffit.
 if not SP.marked then
 	local marked = {}
 	if type( setmetatable ) == "function" then
@@ -30,6 +30,39 @@ end
 function SP.Mark( fn )
 	if type( fn ) == "function" then SP.marked[fn] = true end
 	return fn
+end
+
+-- rawset est nil dans ce bac à sable. Une clé déjà dans la table s'écrit
+-- sans passer par __newindex. Une clé nouvelle, sous __newindex, retire
+-- la métatable le temps de l'écriture : holder[key] = value rappellerait
+-- __newindex et bouclerait.
+function SP.Write( holder, key, value )
+	if type( holder ) ~= "table" then return end
+	if type( rawset ) == "function" then
+		rawset( holder, key, value )
+		return
+	end
+	if type( rawget ) == "function" then
+		local current = rawget( holder, key )
+		if current ~= nil then
+			holder[key] = value
+			return
+		end
+	end
+	local mt = nil
+	if type( getmetatable ) == "function" then
+		local ok, current = pcall( getmetatable, holder )
+		if ok and type( current ) == "table" then mt = current end
+	end
+	if type( mt ) ~= "table" or mt.__newindex == nil then
+		holder[key] = value
+		return
+	end
+	if type( setmetatable ) ~= "function" then return end
+	local removedOk = pcall( setmetatable, holder, nil )
+	if not removedOk then return end
+	holder[key] = value
+	pcall( setmetatable, holder, mt )
 end
 
 local GROUP_ORDER = { Robots = 1, Coffres = 2, Caisses = 3, Minerais = 4, Autres = 5 }
@@ -476,7 +509,9 @@ function SP.EnsureSelectHook()
 	SelectLoot = wrapped
 	local env = getfenv and getfenv( 1 )
 	if type( env ) == "table" then env.SelectLoot = wrapped end
-	if _G ~= env then rawset( _G, "SelectLoot", wrapped ) end
+	if type( _G ) == "table" and _G ~= env then
+		SP.Write( _G, "SelectLoot", wrapped )
+	end
 end
 
 function SP.ServerPulse( game )
@@ -1148,6 +1183,7 @@ function SP.ClientOpen( self )
 		local ok, gui = pcall( sm.jsonGui.createGui, { isInteractive = true, bNeedsCursor = true } )
 		if ok and gui ~= nil then
 			self.cl.spGui = gui
+			log( "creation de la fenetre" )
 			pcall( function() gui:setOnCloseCallback( "cl_spClosed" ) end )
 		else
 			log( "creation de la fenetre en echec:", gui )
@@ -1548,13 +1584,15 @@ function SP.ClientRender( self, data )
 end
 
 --------------------------------------------------------------------------------
--- Branchements. mod.lua est charge avant que la classe SurvivalGame existe,
--- et une deuxieme fois depuis le joueur. On accroche au premier tick.
+-- Branchements. mod.lua est charge avant SurvivalGame = class( nil ), et une
+-- deuxieme fois depuis le joueur. Les callbacks reseau sont poses sur la
+-- table que class( nil ) renvoie, avant la creation de l'instance.
 --------------------------------------------------------------------------------
 
 function SP.SvCommand( self, params, player )
 	params = params or {}
 	SP.game = self
+	log( "sv_survivalPlus", params.cmd or "state" )
 	if params.cmd == "open" then
 		self.network:sendToClient( player, "cl_spOpen", {} )
 		return
@@ -1573,6 +1611,7 @@ function SP.InstallNetworkMethods( classTable )
 		SP.ClientOpen( self )
 	end
 	classTable.cl_spState = function( self, data )
+		log( "cl_spState" )
 		SP.game = self
 		SP.ClientState( self, data )
 	end
@@ -1648,10 +1687,11 @@ function SP.HookClassTable( classTable )
 	SP.InstallNetworkMethods( classTable )
 	for _, key in ipairs( { "server_onFixedUpdate", "client_onCreate", "client_onFixedUpdate", "bindChatCommands", "cl_onChatCommand", "cl_modMenuButton" } ) do
 		if type( classTable[key] ) == "function" then
-			rawset( classTable, key, SP.WrapGameMethod( key, classTable[key] ) )
+			SP.Write( classTable, key, SP.WrapGameMethod( key, classTable[key] ) )
 		end
 	end
-	if type( getmetatable ) ~= "function" or type( setmetatable ) ~= "function" then
+	-- Sans rawset, __newindex ne peut pas écrire une clé nouvelle sans se rappeler.
+	if type( getmetatable ) ~= "function" or type( setmetatable ) ~= "function" or type( rawset ) ~= "function" then
 		return
 	end
 	local mtOk, mt = pcall( getmetatable, classTable )
@@ -1677,7 +1717,7 @@ function SP.HookClassTable( classTable )
 		elseif type( prevNew ) == "table" then
 			prevNew[k] = v
 		else
-			rawset( t, k, v )
+			SP.Write( t, k, v )
 		end
 	end
 	local setOk, setErr = pcall( setmetatable, classTable, newmt )
@@ -1695,12 +1735,78 @@ function SP.HookClassTable( classTable )
 	end
 end
 
+-- class() est globale. Le prochain class( nil ) est SurvivalGame, juste
+-- après le retour de ce fichier. SurvivalPlayer = class( BasePlayer ) ne
+-- doit pas recevoir ces méthodes.
+function SP.InstallClassHook()
+	if type( class ) ~= "function" then
+		log( "class() absente, callbacks reseau non poses" )
+		return
+	end
+	if SP.IsMarked( class ) then return end
+	local engineClass = class
+	local function wrappedClass( base, ... )
+		local classTable = engineClass( base, ... )
+		if SP.armNextClass and base == nil then
+			SP.armNextClass = false
+			if type( classTable ) == "table" then
+				SP.InstallNetworkMethods( classTable )
+				log( "callbacks sv_survivalPlus et cl_spState poses" )
+			else
+				log( "class() n'a pas rendu une table" )
+			end
+		end
+		return classTable
+	end
+	SP.Mark( wrappedClass )
+	class = wrappedClass
+end
+
+-- OnButton reçoit l'instance avant runClient. Le clic OUVRIR peut alors
+-- ouvrir la fenêtre sur cette instance.
+function SP.CaptureMenuOwner()
+	if type( ModMenuGui ) ~= "table" or type( ModMenuGui.OnButton ) ~= "function" then
+		log( "ModMenuGui.OnButton absent" )
+		return
+	end
+	if SP.IsMarked( ModMenuGui.OnButton ) then return end
+	local previous = ModMenuGui.OnButton
+	local function wrapped( owner, buttonName )
+		if type( owner ) == "table" then SP.game = owner end
+		return previous( owner, buttonName )
+	end
+	SP.Mark( wrapped )
+	ModMenuGui.OnButton = wrapped
+end
+
+-- bindChatCommands appelle sm.game.bindChatCommand au démarrage de
+-- l'instance. /loot vise cl_spOpen, déjà posé sur la classe.
+function SP.InstallLootCommand()
+	if sm == nil or sm.game == nil or type( sm.game.bindChatCommand ) ~= "function" then return end
+	if SP.IsMarked( sm.game.bindChatCommand ) then return end
+	local previous = sm.game.bindChatCommand
+	local function wrapped( command, params, callback, help )
+		local result = previous( command, params, callback, help )
+		if not SP.lootBound then
+			SP.lootBound = true
+			previous( "/loot", {}, "cl_spOpen", "Ouvrir l'editeur Survival +" )
+		end
+		return result
+	end
+	SP.Mark( wrapped )
+	sm.game.bindChatCommand = wrapped
+end
+
 function SP.WatchEnvironment()
 	if SP.envWatched then return end
 	SP.envWatched = true
-	local env = getfenv and getfenv( 1 )
-	if type( env ) ~= "table" then return end
-	if type( getmetatable ) == "function" and type( setmetatable ) == "function" then
+	local env = nil
+	if type( getfenv ) == "function" then
+		-- Le niveau 1 doit être une fonction Lua. pcall(getfenv, 1) viserait pcall.
+		local envOk, current = pcall( function() return getfenv( 1 ) end )
+		if envOk and type( current ) == "table" then env = current end
+	end
+	if type( env ) == "table" and type( getmetatable ) == "function" and type( setmetatable ) == "function" and type( rawset ) == "function" then
 		local mtOk, mt = pcall( getmetatable, env )
 		if not mtOk then mt = nil end
 		if not ( type( mt ) == "table" and mt._spEnv ) then
@@ -1718,7 +1824,7 @@ function SP.WatchEnvironment()
 				elseif type( prevNew ) == "table" then
 					prevNew[k] = v
 				else
-					rawset( t, k, v )
+					SP.Write( t, k, v )
 				end
 				if k == "SurvivalGame" and type( v ) == "table" then
 					local hookOk, hookErr = pcall( SP.HookClassTable, v )
@@ -1728,9 +1834,9 @@ function SP.WatchEnvironment()
 			local setOk, setErr = pcall( setmetatable, env, newmt )
 			if not setOk then log( "surveillance de l'environnement impossible:", setErr ) end
 		end
-	elseif not SP.metaSkipLogged then
+	elseif type( env ) == "table" and not SP.metaSkipLogged then
 		SP.metaSkipLogged = true
-		log( "metatables indisponibles, accrochage par le suivi de chargement" )
+		log( "metatables ou rawset indisponibles, accrochage par le suivi de chargement" )
 	end
 	if not ( debug and debug.sethook ) then return end
 	local lines = 0
@@ -1749,6 +1855,7 @@ function SP.WatchEnvironment()
 	local hookOk, hookErr = pcall( debug.sethook, function()
 		lines = lines + 1
 		local classTable = nil
+		if type( SurvivalGame ) == "table" then classTable = SurvivalGame end
 		for level = 2, 5 do
 			local caller = callerEnv( level )
 			if type( caller ) == "table" and type( caller.SurvivalGame ) == "table" then
@@ -1786,12 +1893,13 @@ function SP.InstallRuntimeHooks()
 	SP.InstallNetworkMethods( SurvivalGame )
 	for _, key in ipairs( { "server_onFixedUpdate", "client_onCreate", "client_onFixedUpdate", "bindChatCommands", "cl_onChatCommand", "cl_modMenuButton" } ) do
 		if type( SurvivalGame[key] ) == "function" and not SP.IsMarked( SurvivalGame[key] ) then
-			rawset( SurvivalGame, key, SP.WrapGameMethod( key, SurvivalGame[key] ) )
+			SP.Write( SurvivalGame, key, SP.WrapGameMethod( key, SurvivalGame[key] ) )
 		end
 	end
 	if not SP.hooksLogged then
 		SP.hooksLogged = true
 		log( "Branchements SurvivalGame en place" )
+		log( "sv_survivalPlus sur la classe:", type( SurvivalGame.sv_survivalPlus ) )
 	end
 end
 
@@ -1849,6 +1957,7 @@ ModManager.Register( {
 					SP.ClientOpen( SP.game )
 					return nil
 				end
+				log( "instance absente au bouton OUVRIR" )
 				SP.pendingOpen = true
 				return "Ouverture de l'editeur..."
 			end,
@@ -1859,5 +1968,11 @@ ModManager.Register( {
 SP.WatchEnvironment()
 SP.Arm()
 if type( SurvivalGame ) == "table" then
+	SP.armNextClass = false
 	SP.HookClassTable( SurvivalGame )
+else
+	SP.armNextClass = true
+	SP.InstallClassHook()
 end
+SP.CaptureMenuOwner()
+SP.InstallLootCommand()
