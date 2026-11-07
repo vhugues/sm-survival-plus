@@ -1,0 +1,9 @@
+// Optional metadata. Nothing breaks without it -- a mod.lua on its own is a
+// valid mod -- but Add-Mod.ps1 shows these when installing, so the player can
+// see what they are about to add and who wrote it.
+{
+	"name":        "Survival +",
+	"author":      "your name here",
+	"version":     "1.0.0",
+	"description": "Editeur de tables de loot pour une partie Survie. Sans profil actif, les drops restent ceux du jeu."
+}

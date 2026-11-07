@@ -1,0 +1,24 @@
+---
+description: Contraintes Survival + (Scrap Mechanic, Mod Manager, loot)
+alwaysApply: true
+---
+
+# Survival +
+
+Avant de modifier ce dépôt, lire `.cursor/skills/scrap-mechanic-modding/SKILL.md`, puis le fichier de référence qui correspond à la tâche. Pour un symbole `sm.*` ou une classe de script, suivre le skill `scrap-mechanic-lua` et la page scrapmechanicdocs.com. Ne pas inventer la signature.
+
+- Nom affiché **Survival +**, id `survivalplus`, dossier `SurvivalPlus`. Dans `mod.json`, `author` reste `your name here`.
+- La v1 ne change que les tables de loot. Pas de `recipe.json`, pas de raffinage, pas de copie du dépôt less-grind.
+- Ne pas réécrire `Install this mod.bat` ni `Install-ThisMod.ps1`.
+- Source à éditer : `SurvivalPlus/` dans ce dépôt. Le jeu et `scrap-mechanic-mods\src\Mods\SurvivalPlus` sont des copies installées.
+- Sur cette machine le Mod Manager est le clone `C:\Users\hugue\gits\scrap-mechanic-mods`. Jeu fermé, puis :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Users\hugue\gits\scrap-mechanic-mods\tools\Add-Mod.ps1 -Force C:\Users\hugue\gits\sm-less-grind\SurvivalPlus
+```
+
+- Journaux : `Scrap Mechanic\Logs\game-*.log`. `print()` n'y arrive pas. Utiliser `ModManager.Log`.
+- Lua 5.1. Une fonction n'accepte pas de champ : `fn._sp = true` plante. Marquer via `SP.marked`.
+- Les callbacks `sv_*` / `cl_*` doivent exister sur la classe avant la création de l'instance.
+- `mod.lua` est chargé deux fois (partie et joueur). `Register` et les accroches sont idempotents.
+- Ne pas committer sans demande. Répondre en français.
