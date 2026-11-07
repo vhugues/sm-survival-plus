@@ -67,10 +67,12 @@ Peaux présentes : `TextBox`, `PrimaryButton`, `SecondaryButton`, `EditBoxEmpty`
 
 Icône : `sm.gui.getItemIconFromUuid` donne `ImageResource`, `ImageGroup`, `ImageName`. Titre : `sm.shape.getShapeTitle` peut renvoyer une clé `#{...}`. Ne pas couper ces clés. Les appels d'icône et de titre sont dans un `pcall`.
 
-Écrans : profils, éditeur (sources à gauche, un tirage à droite), édition d'une ligne, ajout. Fenêtre 760×620. Colonne des sources 250 px. Pagination `SP.PAGE = 6`. Les libellés courts `Prec.` et `Suiv.` tiennent dans cette colonne. `Retour` est la navigation. Sur une ligne, les boutons sont `Suppr` et `Restaure`. Une ligne ajoutée n'a que `Suppr`.
+Écrans : profils, éditeur, ajout. La taille vient de `sm.jsonGui.getViewSize()` (deux entiers, coords 720), plafonnée à 1040×680, sans plancher qui dépasserait la vue. L'éditeur garde la liste : filtre de groupe et recherche de sources à gauche, un tirage à droite en colonnes (objet, poids, %, quantité, état). Cliquer une ligne ouvre un bandeau en bas. Un clic qui change de source vide `editItem`, `editOccurrence` et `editAdd` dans la même action. `Retour` ferme le bandeau ou l'écran d'ajout. `Supprimer` et `Restaurer` sont dans le bandeau. Une ligne ajoutée n'a que `Supprimer`.
+
+La recherche de source est locale. Son champ s'appelle `sourceSearch` : le nom `search` envoie le catalogue au serveur. Changer de groupe, de page ou de tirage ne vide pas l'édition.
 
 États affichés : inchangé, modifié (avant → après), ajouté, supprimé, orphelin.
 
-Les listes de profils, de sources et de lignes sont paginées côté client : le serveur envoie la liste complète de la source et du tirage choisis. Le catalogue `ITEMS` (environ 1500 entrées) est paginé côté serveur, 6 par page, et n'est mis en cache qu'une fois `ITEMS` devenu une table. Un compteur `req` fait ignorer une réponse réseau périmée.
+Les listes de profils, de sources et de lignes sont paginées côté client : le serveur envoie la liste complète de la source et du tirage choisis. Les profils restent à `SP.PAGE` (6). Les sources et les lignes remplissent la colonne, de 4 à 16. Le catalogue `ITEMS` (environ 1500 entrées) est paginé côté serveur, `SP.CATALOG_PAGE` (14) par page, affiché deux par ligne, et n'est mis en cache qu'une fois `ITEMS` devenu une table. Un compteur `req` fait ignorer une réponse réseau périmée.
 
-La vue renvoyée par `Handle` reprend `profileId`, `source`, `roll`, `rolls`, `profiles`, `sources`, `rows` (légendes déjà construites, quantités aplaties), `enabled`, `notice`, `req`. Elle inclut `edit` quand une ligne est en édition, et la page de catalogue seulement si l'écran client est `add`.
+La vue renvoyée par `Handle` reprend `profileId`, `source`, `roll`, `rolls`, `profiles`, `sources` (`title` est le nom court, `group` le groupe), `rows` (`weightText`, `percentText`, `qtyText`, quantités aplaties), `enabled`, `notice`, `req`. Elle inclut `edit` dès que `editAdd` ou `editItem` est non vide, et la page de catalogue seulement si l'écran client est `add`.
