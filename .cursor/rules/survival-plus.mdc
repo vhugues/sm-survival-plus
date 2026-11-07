@@ -17,6 +17,7 @@ Avant de modifier ce dépôt, lire `.cursor/skills/scrap-mechanic-modding/SKILL.
 powershell -ExecutionPolicy Bypass -File C:\Users\hugue\gits\scrap-mechanic-mods\tools\Add-Mod.ps1 -Force C:\Users\hugue\gits\sm-less-grind\SurvivalPlus
 ```
 
+- Dès que le développement du mod est terminé (fichiers écrits), lancer la commande ci-dessus en parallèle de la relecture du diff. Ne pas attendre la fin de la review. Si le processus `ScrapMechanic` tourne, le dire et ne pas lancer `Add-Mod.ps1`.
 - Journaux : `Scrap Mechanic\Logs\game-*.log`. `print()` n'y arrive pas. Utiliser `ModManager.Log`.
 - Lua 5.1. Une fonction n'accepte pas de champ : `fn._sp = true` plante. Marquer via `SP.marked`.
 - Les callbacks `sv_*` / `cl_*` doivent exister sur la classe avant la création de l'instance.
