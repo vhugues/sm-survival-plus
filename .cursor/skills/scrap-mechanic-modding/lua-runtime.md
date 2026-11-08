@@ -12,6 +12,8 @@ Le journal du 7 novembre 2026 le montre : `MechanicCharacter.lua` charge `Surviv
 
 `SurvivalPlus = SurvivalPlus or {}` évite d'effacer l'état au second passage. `Register`, `SP.marked`, les enveloppes et les callbacks réseau doivent tous tolérer d'être rejoués.
 
+`mod.lua` charge ensuite, dans ce même environnement, `Util.lua`, `Loot.lua`, `Editor.lua` et `Hooks.lua`. Chaque chunk commence par `local SP = SurvivalPlus` : `SP` n'est pas global. `log`, `num`, `int` et `str` sont posés sur `SP` par `Util.lua`, puis repris en local. `Register` et le démarrage restent dans `mod.lua`.
+
 ## Les fonctions n'ont pas de champs
 
 Le Lua du jeu refuse `fonction.champ`. Le journal `game-20261107-190831.log` contient les deux plantages qui en découlent :
